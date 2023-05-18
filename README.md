@@ -5,7 +5,7 @@ SQL Server Enterprise Edition provides datacenter capabilities with high perform
 
 This script will help you identify if you are using any Enterprise edition featuers or not, it cover majority of use case, it does not check each and every feature, but covers the most commonly used features. 
 
-**This script requires you to provide dbowner userid and password. It will retun 1 if any of the bellow Enterprise Edition features are being used. **
+**This script requires you to provide login with dbowner and ALTER ANY EVENT SESSION. It will retun 1 if any of the bellow Enterprise Edition features are being used. **
 It checks following features:
 1. Database level features 
 2. Online Index Rebuild used outside DB Maintenance plan 
