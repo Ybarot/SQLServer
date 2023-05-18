@@ -1,20 +1,22 @@
+DECLARE @Status bit;
 use master
-IF OBJECT_ID('tempdb.dbo.#onlineIndex_table') IS NOT NULL
-DROP TABLE #onlineIndex_table
-create table #onlineIndex_table
-(
-DBName sysname NOT NULL ,
-Enabled char(2) NOT NULL,
-Status varchar(50) NOT NULL
-)
+IF NOT EXISTS (SELECT name FROM sys.dm_xe_sessions  WHERE name = 'online_rebuild')
+Begin
+CREATE EVENT SESSION [online_rebuild] ON SERVER 
+ADD EVENT sqlserver.progress_report_online_index_operation(SET collect_database_name=(0))
+ADD TARGET package0.event_counter
+WITH (MAX_MEMORY=4096 KB,EVENT_RETENTION_MODE=ALLOW_SINGLE_EVENT_LOSS,MAX_DISPATCH_LATENCY=30 SECONDS,MAX_EVENT_SIZE=0 KB,MEMORY_PARTITION_MODE=NONE,TRACK_CAUSALITY=OFF,STARTUP_STATE=OFF)
+End
 
-Insert #onlineIndex_table
-EXEC sp_msforeachdb
-N' USE [?] SELECT ''?'' as DBName , IIF(count(1)>0,1,0) as Enabled, ''You are using ONLINE INDEX feature'' as Status
-FROM FN_DBLOG(NULL,NULL)
-WHERE [Transaction Name] =''ONLINE_INDEX_DDL''
-'
+SELECT @Status = iif(RS.name IS NULL, 0, 1)
+FROM sys.dm_xe_sessions RS
+RIGHT JOIN sys.server_event_sessions ES ON RS.name = ES.name
+WHERE es.name = 'online_rebuild'
 
+if @Status = 0
+Begin
+ALTER EVENT SESSION [online_rebuild] ON SERVER STATE =  START ;
+End
 
 IF OBJECT_ID('tempdb.dbo.#EnterpriseFeaturesDB') IS NOT NULL
 DROP TABLE #EnterpriseFeaturesDB
@@ -76,7 +78,22 @@ SELECT DB_Name() as DBName,IIF(count(1)>0,1,0) as Enabled, 'You are using asynch
 from sys.database_mirroring
 WHERE mirroring_safety_level = 1
 union
-select DBName, Enabled, Status from #onlineIndex_table where Enabled=1
-order by enabled desc
-DROP TABLE #onlineIndex_table
+SELECT DB_Name() as DBName,IIF(count(1)>0,1,0) as Enabled, 
+Case
+ WHEN IIF(count(1)>0,1,0) > 0 then 'You are using Online Indexing Enterprise Feature' 
+ ELSE 'You are not using Online Index features or Online Indexing not done after enabling Event Sessions'
+ END AS Enterprise_Feature
+FROM (
+SELECT 
+        CAST(xet.target_data AS xml)  as target_data
+    FROM sys.dm_xe_session_targets AS xet  
+    JOIN sys.dm_xe_sessions AS xe  
+       ON (xe.address = xet.event_session_address)  
+    WHERE xe.name = 'online_rebuild' 
+        and target_name='event_counter'
+
+    ) as t
+CROSS APPLY t.target_data.nodes('//CounterTarget/Packages/Package/Event') AS xed (slot_data)
+where xed.slot_data.value('(@count)[1]', 'varchar(256)') >0
+
 
